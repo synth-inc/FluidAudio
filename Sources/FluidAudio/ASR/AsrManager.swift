@@ -296,6 +296,19 @@ public final class AsrManager {
         logger.info("AsrManager resources cleaned up")
     }
 
+    /// Look up the vocabulary token ID for an ISO 639-1 language code.
+    ///
+    /// Parakeet multilingual models have language tokens like `<|en|>`, `<|fr|>`, etc.
+    /// at vocabulary positions 24-206. Priming the decoder LSTM with this token biases
+    /// transcription toward that language.
+    ///
+    /// - Parameter code: ISO 639-1 language code (e.g. "en", "fr", "de")
+    /// - Returns: Token ID if found, nil otherwise
+    public func languageTokenId(for code: String) -> Int? {
+        let target = "<|\(code)|>"
+        return vocabulary.first(where: { $0.value == target })?.key
+    }
+
     internal func tdtDecodeWithTimings(
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
@@ -304,7 +317,8 @@ public final class AsrManager {
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
-        globalFrameOffset: Int = 0
+        globalFrameOffset: Int = 0,
+        languageTokenId: Int? = nil
     ) async throws -> TdtHypothesis {
         // Route to appropriate decoder based on model version
         guard let models = asrModels, let decoder_ = decoderModel, let joint = jointModel else {
@@ -322,7 +336,8 @@ public final class AsrManager {
                 decoderState: &decoderState,
                 contextFrameAdjustment: contextFrameAdjustment,
                 isLastChunk: isLastChunk,
-                globalFrameOffset: globalFrameOffset
+                globalFrameOffset: globalFrameOffset,
+                languageTokenId: languageTokenId
             )
         case .v3:
             let decoder = TdtDecoderV3(config: config)
@@ -335,7 +350,8 @@ public final class AsrManager {
                 decoderState: &decoderState,
                 contextFrameAdjustment: contextFrameAdjustment,
                 isLastChunk: isLastChunk,
-                globalFrameOffset: globalFrameOffset
+                globalFrameOffset: globalFrameOffset,
+                languageTokenId: languageTokenId
             )
         }
     }
@@ -351,11 +367,11 @@ public final class AsrManager {
     ///   - source: The audio source type (microphone or system audio)
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails or models are not initialized
-    public func transcribe(_ audioBuffer: AVAudioPCMBuffer, source: AudioSource = .microphone) async throws -> ASRResult
+    public func transcribe(_ audioBuffer: AVAudioPCMBuffer, source: AudioSource = .microphone, languageCode: String? = nil) async throws -> ASRResult
     {
         let audioFloatArray = try audioConverter.resampleBuffer(audioBuffer)
 
-        let result = try await transcribe(audioFloatArray, source: source)
+        let result = try await transcribe(audioFloatArray, source: source, languageCode: languageCode)
 
         return result
     }
@@ -467,8 +483,10 @@ public final class AsrManager {
     /// - Throws: ASRError if transcription fails or models are not initialized
     public func transcribe(
         _ audioSamples: [Float],
-        source: AudioSource = .microphone
+        source: AudioSource = .microphone,
+        languageCode: String? = nil
     ) async throws -> ASRResult {
+        let langTokenId = languageCode.flatMap { languageTokenId(for: $0) }
         let shouldEmitProgress = audioSamples.count > ASRConstants.maxModelSamples
         if shouldEmitProgress {
             _ = await progressEmitter.ensureSession()
@@ -478,10 +496,10 @@ public final class AsrManager {
             switch source {
             case .microphone:
                 result = try await transcribeWithState(
-                    audioSamples, decoderState: &microphoneDecoderState)
+                    audioSamples, decoderState: &microphoneDecoderState, languageTokenId: langTokenId)
             case .system:
                 result = try await transcribeWithState(
-                    audioSamples, decoderState: &systemDecoderState)
+                    audioSamples, decoderState: &systemDecoderState, languageTokenId: langTokenId)
             }
 
             // Stateless architecture: reset decoder state after each transcription to ensure

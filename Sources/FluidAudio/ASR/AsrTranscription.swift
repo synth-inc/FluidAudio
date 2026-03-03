@@ -5,7 +5,7 @@ import OSLog
 extension AsrManager {
 
     internal func transcribeWithState(
-        _ audioSamples: [Float], decoderState: inout TdtDecoderState
+        _ audioSamples: [Float], decoderState: inout TdtDecoderState, languageTokenId: Int? = nil
     ) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
         guard audioSamples.count >= 16_000 else { throw ASRError.invalidAudioData }
@@ -32,7 +32,8 @@ extension AsrManager {
                 paddedAudio,
                 originalLength: frameAlignedLength,
                 actualAudioFrames: nil,  // Will be calculated from originalLength
-                decoderState: &decoderState
+                decoderState: &decoderState,
+                languageTokenId: languageTokenId
             )
 
             var result = processTranscriptionResult(
@@ -79,7 +80,8 @@ extension AsrManager {
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
-        globalFrameOffset: Int = 0
+        globalFrameOffset: Int = 0,
+        languageTokenId: Int? = nil
     ) async throws -> (hypothesis: TdtHypothesis, encoderSequenceLength: Int) {
 
         let preprocessorInput = try await preparePreprocessorInput(
@@ -128,7 +130,8 @@ extension AsrManager {
                 decoderState: &decoderState,
                 contextFrameAdjustment: contextFrameAdjustment,
                 isLastChunk: isLastChunk,
-                globalFrameOffset: globalFrameOffset
+                globalFrameOffset: globalFrameOffset,
+                languageTokenId: languageTokenId
             )
 
             if let preprocessorAudioArray {
