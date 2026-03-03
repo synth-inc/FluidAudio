@@ -104,7 +104,8 @@ internal struct TdtDecoderV3 {
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
-        globalFrameOffset: Int = 0
+        globalFrameOffset: Int = 0,
+        languageTokenId: Int? = nil
     ) async throws -> TdtHypothesis {
         // Early exit for very short audio (< 160ms)
         guard encoderSequenceLength > 1 else {
@@ -194,6 +195,23 @@ internal struct TdtDecoderV3 {
             let zero = TdtDecoderState.make()
             decoderState.hiddenState.copyData(from: zero.hiddenState)
             decoderState.cellState.copyData(from: zero.cellState)
+        }
+
+        // Language token warmup: prime the LSTM hidden state with a language token
+        // to bias decoding toward a specific language. The language token updates
+        // the hidden/cell state but we don't set predictorOutput, so the SOS priming
+        // below still runs and produces the initial decoder projection for the joint
+        // network. The LSTM carries the language bias forward through both steps.
+        if let langTokenId = languageTokenId,
+           decoderState.predictorOutput == nil && hypothesis.lastToken == nil {
+            _ = try runDecoder(
+                token: langTokenId,
+                state: decoderState,
+                model: decoderModel,
+                targetArray: reusableTargetArray,
+                targetLengthArray: reusableTargetLengthArray
+            )
+            // hiddenState/cellState are updated in-place via outputBackings
         }
 
         // Prime the decoder with Start-of-Sequence token if needed
