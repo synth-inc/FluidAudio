@@ -197,14 +197,35 @@ internal struct TdtDecoderV3 {
             decoderState.cellState.copyData(from: zero.cellState)
         }
 
-        // Prime the decoder with a start-of-sequence token.
-        // When a language token is provided, use it as the SOS token instead of blank.
-        // This primes the LSTM hidden state with the language embedding in a single step,
-        // biasing all subsequent predictions toward that language.
+        // Language token warmup: prime the LSTM hidden state with a language token
+        // to bias decoding toward a specific language. We create a fresh copy of the
+        // state to avoid in-place mutation issues with outputBackings sharing MLMultiArrays.
+        if let langTokenId = languageTokenId,
+           decoderState.predictorOutput == nil && hypothesis.lastToken == nil {
+            // Create a fresh state copy so the language warmup output doesn't share
+            // MLMultiArray references with decoderState (avoids h_in == h_out conflicts)
+            var langState = try TdtDecoderState(from: decoderState)
+            let langPrimed = try runDecoder(
+                token: langTokenId,
+                state: langState,
+                model: decoderModel,
+                targetArray: reusableTargetArray,
+                targetLengthArray: reusableTargetLengthArray
+            )
+            // Copy primed hidden/cell values back into decoderState
+            decoderState.hiddenState.copyData(from: langPrimed.newState.hiddenState)
+            decoderState.cellState.copyData(from: langPrimed.newState.cellState)
+        }
+
+        // Prime the decoder with Start-of-Sequence token if needed
+        // This initializes the LSTM's language model context
+        // Note: In RNN-T/TDT, we use blank token as SOS
+        // When language warmup ran above, the hidden state already carries
+        // the language bias, so SOS priming inherits it.
         if decoderState.predictorOutput == nil && hypothesis.lastToken == nil {
-            let sosToken = languageTokenId ?? config.tdtConfig.blankId
+            let sos = config.tdtConfig.blankId  // blank=8192 serves as SOS
             let primed = try runDecoder(
-                token: sosToken,
+                token: sos,
                 state: decoderState,
                 model: decoderModel,
                 targetArray: reusableTargetArray,
