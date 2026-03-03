@@ -197,33 +197,15 @@ internal struct TdtDecoderV3 {
             decoderState.cellState.copyData(from: zero.cellState)
         }
 
-        // Prime the decoder with Start-of-Sequence token if needed
-        // This initializes the LSTM's language model context
-        // When a language token is provided, we use it to prime the LSTM hidden state
-        // first, then run the normal SOS priming on top of the language-biased state.
-        // This carries the language bias through without consuming a decode step.
+        // Prime the decoder with a start-of-sequence token.
+        // When a language token is provided, use it as the SOS token instead of blank.
+        // This primes the LSTM hidden state with the language embedding in a single step,
+        // biasing all subsequent predictions toward that language.
         if decoderState.predictorOutput == nil && hypothesis.lastToken == nil {
-            // Language token warmup: prime LSTM hidden state before SOS
-            if let langTokenId = languageTokenId {
-                let langPrimed = try runDecoder(
-                    token: langTokenId,
-                    state: decoderState,
-                    model: decoderModel,
-                    targetArray: reusableTargetArray,
-                    targetLengthArray: reusableTargetLengthArray
-                )
-                // Carry forward the primed state for SOS step below
-                hypothesis.decState = langPrimed.newState
-            }
-
-            // SOS priming: use blank token to produce the initial decoder projection
-            // for the joint network. When language warmup ran, the hidden state already
-            // carries the language bias from the step above.
-            let stateForSOS = hypothesis.decState ?? decoderState
-            let sos = config.tdtConfig.blankId  // blank=8192 serves as SOS
+            let sosToken = languageTokenId ?? config.tdtConfig.blankId
             let primed = try runDecoder(
-                token: sos,
-                state: stateForSOS,
+                token: sosToken,
+                state: decoderState,
                 model: decoderModel,
                 targetArray: reusableTargetArray,
                 targetLengthArray: reusableTargetLengthArray
