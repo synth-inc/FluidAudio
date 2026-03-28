@@ -125,7 +125,7 @@ final class ModelNamesTests: XCTestCase {
         // Verify name (repo slug with -coreml suffix)
         XCTAssertEqual(repo.name, "parakeet-tdt-ctc-110m-coreml")
 
-        // Verify folder name (simplified local folder name)
+        // Verify folder name (simplified - strips -coreml suffix by default)
         XCTAssertEqual(repo.folderName, "parakeet-tdt-ctc-110m")
 
         // Should have no subpath (not a variant repo)

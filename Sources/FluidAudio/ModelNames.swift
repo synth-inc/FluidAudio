@@ -129,16 +129,8 @@ public enum Repo: String, CaseIterable {
             return "nemotron-streaming/560ms"
         case .sortformer:
             return "sortformer"
-        case .lseend:
-            return "ls-eend"
-        case .pocketTts:
-            return "pocket-tts"
-        case .multilingualG2p:
-            return "charsiu-g2p-byt5"
-        case .parakeetTdtCtc110m:
-            return "parakeet-tdt-ctc-110m"
         default:
-            return name
+            return name.replacingOccurrences(of: "-coreml", with: "")
         }
     }
 }
@@ -166,6 +158,7 @@ public enum ModelNames {
         public static let fbank = "FBank"
         public static let embedding = "Embedding"
         public static let pldaRho = "PldaRho"
+        public static let pldaParameters = "plda-parameters.json"
 
         public static let segmentationFile = segmentation + ".mlmodelc"
         public static let fbankFile = fbank + ".mlmodelc"
@@ -182,6 +175,7 @@ public enum ModelNames {
             fbankPath,
             embeddingPath,
             pldaRhoPath,
+            pldaParameters,
         ]
     }
 
