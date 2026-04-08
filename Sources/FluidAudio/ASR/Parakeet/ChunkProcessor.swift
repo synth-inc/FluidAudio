@@ -56,6 +56,7 @@ struct ChunkProcessor {
     func process(
         using manager: AsrManager,
         startTime: Date,
+        languageTokenId: Int? = nil,
         progressHandler: ((Double) async -> Void)? = nil
     ) async throws -> ASRResult {
         var chunkOutputs: [[TokenWindow]] = []
@@ -91,7 +92,8 @@ struct ChunkProcessor {
                 chunkStart: chunkStart,
                 isLastChunk: isLastChunk,
                 using: manager,
-                decoderState: &chunkDecoderState
+                decoderState: &chunkDecoderState,
+                languageTokenId: languageTokenId
             )
 
             // Combine tokens, timestamps, and confidences into aligned tuples
@@ -176,7 +178,8 @@ struct ChunkProcessor {
         chunkStart: Int,
         isLastChunk: Bool,
         using manager: AsrManager,
-        decoderState: inout TdtDecoderState
+        decoderState: inout TdtDecoderState,
+        languageTokenId: Int? = nil
     ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], durations: [Int]) {
         guard !samples.isEmpty else { return ([], [], [], []) }
 
@@ -199,7 +202,8 @@ struct ChunkProcessor {
             decoderState: &decoderState,
             contextFrameAdjustment: contextFrames,  // Skip context frames in decoder
             isLastChunk: isLastChunk,
-            globalFrameOffset: globalFrameOffset
+            globalFrameOffset: globalFrameOffset,
+            languageTokenId: languageTokenId
         )
 
         if hypothesis.isEmpty || encoderSequenceLength == 0 {

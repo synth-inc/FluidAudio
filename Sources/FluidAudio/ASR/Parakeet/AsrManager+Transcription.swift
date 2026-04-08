@@ -45,6 +45,7 @@ extension AsrManager {
         let result = try await processor.process(
             using: self,
             startTime: startTime,
+            languageTokenId: languageTokenId,
             progressHandler: { [weak self] progress in
                 guard let self else { return }
                 await self.progressEmitter.report(progress: progress)
