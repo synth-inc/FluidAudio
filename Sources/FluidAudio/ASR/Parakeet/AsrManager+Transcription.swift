@@ -3,7 +3,7 @@ import Foundation
 extension AsrManager {
 
     internal func transcribeWithState(
-        _ audioSamples: [Float], source: AudioSource
+        _ audioSamples: [Float], source: AudioSource, languageTokenId: Int? = nil
     ) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
         guard audioSamples.count >= config.sampleRate else { throw ASRError.invalidAudioData }
@@ -21,7 +21,8 @@ extension AsrManager {
                 originalLength: frameAlignedLength,
                 actualAudioFrames: nil,  // Will be calculated from originalLength
                 decoderState: &decoderState,
-                isLastChunk: true  // Single-chunk: always first and last
+                isLastChunk: true,  // Single-chunk: always first and last
+                languageTokenId: languageTokenId
             )
 
             let result = processTranscriptionResult(

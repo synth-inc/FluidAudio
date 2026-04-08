@@ -69,7 +69,8 @@ internal struct TdtDecoderV3: Sendable {
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
-        globalFrameOffset: Int = 0
+        globalFrameOffset: Int = 0,
+        languageTokenId: Int? = nil
     ) async throws -> TdtHypothesis {
         // Early exit for very short audio (< 160ms)
         guard encoderSequenceLength > 1 else {
@@ -164,6 +165,30 @@ internal struct TdtDecoderV3: Sendable {
                 from: primed.output, key: "decoder", errorMessage: "Invalid decoder output")
             decoderState.predictorOutput = proj
             hypothesis.decState = primed.newState
+
+            // Language bias: overwrite the LSTM hidden/cell state with language-primed
+            // values AFTER SOS priming. This preserves the normal predictor output
+            // (avoiding first-word truncation) while biasing subsequent decoder calls
+            // toward the target language through the recurrent hidden state.
+            //
+            // In Python (parakeet-mlx), the first decode step uses a zero-vector embedding
+            // with language-primed state: LSTM(zeros, primed_state). CoreML can't pass zero
+            // embeddings (it requires a token ID), so we keep the SOS predictor output and
+            // only replace the hidden state. The language bias takes effect when the first
+            // non-blank token is emitted and fed back through the decoder.
+            if let langTokenId = languageTokenId {
+                let layers = decoderState.hiddenState.shape[0].intValue
+                var langState = TdtDecoderState.make(decoderLayers: layers)
+                let langPrimed = try modelInference.runDecoder(
+                    token: langTokenId,
+                    state: langState,
+                    model: decoderModel,
+                    targetArray: reusableTargetArray,
+                    targetLengthArray: reusableTargetLengthArray
+                )
+                decoderState.hiddenState.copyData(from: langPrimed.newState.hiddenState)
+                decoderState.cellState.copyData(from: langPrimed.newState.cellState)
+            }
         }
 
         // Variables for preventing infinite token emission at same timestamp
