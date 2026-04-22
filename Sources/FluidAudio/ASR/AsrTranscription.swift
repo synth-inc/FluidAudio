@@ -45,6 +45,22 @@ extension AsrManager {
                 processingTime: Date().timeIntervalSince(startTime)
             )
 
+            // Recover dictation commands (period, comma, end quote, etc.) dropped by TDT
+            if let repairedText = await repairDictationGaps(
+                hypothesis: hypothesis, audioSamples: audioSamples)
+            {
+                result = ASRResult(
+                    text: repairedText,
+                    confidence: result.confidence,
+                    duration: result.duration,
+                    processingTime: result.processingTime,
+                    tokenTimings: result.tokenTimings,
+                    performanceMetrics: result.performanceMetrics,
+                    ctcDetectedTerms: result.ctcDetectedTerms,
+                    ctcAppliedTerms: result.ctcAppliedTerms
+                )
+            }
+
             // Auto-apply vocabulary rescoring when configured
             if vocabBoostingEnabled {
                 result = await applyVocabularyRescoring(result: result, audioSamples: audioSamples)
@@ -144,6 +160,45 @@ extension AsrManager {
             }
             throw error
         }
+    }
+
+    /// Run only the preprocessor + encoder stages and return the raw encoder output.
+    /// Used by diagnostic tests to run the decoder multiple times with different configs
+    /// without re-encoding the audio each time.
+    ///
+    /// The encoder output is deep-copied into a new MLMultiArray so it remains valid
+    /// after the CoreML prediction provider is released.
+    internal func runEncoderOnly(
+        _ audioSamples: [Float]
+    ) async throws -> (encoderOutput: MLMultiArray, encoderSequenceLength: Int, actualAudioFrames: Int) {
+        guard let preprocessorModel = preprocessorModel, let encoderModel = encoderModel else {
+            throw ASRError.notInitialized
+        }
+        let originalLength = audioSamples.count
+        let padded = padAudioIfNeeded(audioSamples, targetLength: ASRConstants.maxModelSamples)
+        let preprocessorInput = try await preparePreprocessorInput(padded, actualLength: originalLength)
+        let preprocessorOutput = try await preprocessorModel.compatPrediction(
+            from: preprocessorInput, options: predictionOptions)
+        let encoderInput = try prepareEncoderInput(
+            encoder: encoderModel, preprocessorOutput: preprocessorOutput,
+            originalInput: preprocessorInput)
+        let encoderOutputProvider = try await encoderModel.compatPrediction(
+            from: encoderInput, options: predictionOptions)
+        let rawEncoderOutput = try extractFeatureValue(
+            from: encoderOutputProvider, key: "encoder", errorMessage: "Invalid encoder output")
+        let encoderLength = try extractFeatureValue(
+            from: encoderOutputProvider, key: "encoder_length",
+            errorMessage: "Invalid encoder output length")
+        let seqLen = encoderLength[0].intValue
+        let actualFrames = ASRConstants.calculateEncoderFrames(from: originalLength)
+
+        // Deep-copy the encoder output: CoreML may back the MLMultiArray with its own
+        // internal buffer that becomes invalid once the prediction provider is released.
+        let copiedOutput = try MLMultiArray(shape: rawEncoderOutput.shape, dataType: rawEncoderOutput.dataType)
+        let byteCount = rawEncoderOutput.count * MemoryLayout<Float>.stride
+        memcpy(copiedOutput.dataPointer, rawEncoderOutput.dataPointer, byteCount)
+
+        return (copiedOutput, seqLen, actualFrames)
     }
 
     private func prepareEncoderInput(

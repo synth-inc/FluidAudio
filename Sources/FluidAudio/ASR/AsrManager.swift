@@ -41,6 +41,8 @@ public final class AsrManager {
 
     // Vocabulary boosting state (configured via configureVocabularyBoosting)
     // Internal access required for AsrTranscription extension (separate file)
+    internal var vadManager: VadManager?
+
     internal var customVocabulary: CustomVocabularyContext?
     internal var ctcSpotter: CtcKeywordSpotter?
     internal var vocabularyRescorer: VocabularyRescorer?
@@ -110,7 +112,9 @@ public final class AsrManager {
         self.jointModel = models.joint
         self.vocabulary = models.vocabulary
 
-        logger.info("Token duration optimization model loaded successfully")
+        if vadManager == nil {
+            vadManager = try? await VadManager()
+        }
 
         logger.info("AsrManager initialized successfully with provided models")
     }
@@ -306,13 +310,42 @@ public final class AsrManager {
         isLastChunk: Bool = false,
         globalFrameOffset: Int = 0
     ) async throws -> TdtHypothesis {
-        // Route to appropriate decoder based on model version
+        try await tdtDecodeWithTimings(
+            encoderOutput: encoderOutput,
+            encoderSequenceLength: encoderSequenceLength,
+            actualAudioFrames: actualAudioFrames,
+            decoderState: &decoderState,
+            overrideTdtConfig: nil,
+            contextFrameAdjustment: contextFrameAdjustment,
+            isLastChunk: isLastChunk,
+            globalFrameOffset: globalFrameOffset
+        )
+    }
+
+    /// Diagnostic overload: allows substituting a custom TdtConfig (e.g., with blankBiasTokens)
+    /// while reusing the manager's already-loaded decoder/joint models.
+    internal func tdtDecodeWithTimings(
+        encoderOutput: MLMultiArray,
+        encoderSequenceLength: Int,
+        actualAudioFrames: Int,
+        decoderState: inout TdtDecoderState,
+        overrideTdtConfig: TdtConfig?,
+        contextFrameAdjustment: Int = 0,
+        isLastChunk: Bool = false,
+        globalFrameOffset: Int = 0
+    ) async throws -> TdtHypothesis {
         guard let models = asrModels, let decoder_ = decoderModel, let joint = jointModel else {
             throw ASRError.notInitialized
         }
+        let effectiveConfig: ASRConfig
+        if let override = overrideTdtConfig {
+            effectiveConfig = ASRConfig(tdtConfig: override)
+        } else {
+            effectiveConfig = config
+        }
         switch models.version {
         case .v2:
-            let decoder = TdtDecoderV2(config: config)
+            let decoder = TdtDecoderV2(config: effectiveConfig)
             return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
                 encoderSequenceLength: encoderSequenceLength,
@@ -325,7 +358,7 @@ public final class AsrManager {
                 globalFrameOffset: globalFrameOffset
             )
         case .v3:
-            let decoder = TdtDecoderV3(config: config)
+            let decoder = TdtDecoderV3(config: effectiveConfig)
             return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
                 encoderSequenceLength: encoderSequenceLength,
